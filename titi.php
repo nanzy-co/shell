@@ -30,8 +30,8 @@ $use_auth = true;
 // Users: array('Username' => 'Password', 'Username2' => 'Password2', ...)
 // Generate secure password hash: Click Admin -> Help -> Generate new password hash
 $auth_users = array(
-    'admin' => '$2y$10$/K.hjNr84lLNDt8fTXjoI.DBp6PpeyoJ.mGwrrLuCZfAwfSAGqhOW', //admin@123
-    'user' => '$2y$10$Zdju9e.6o38Su430se1MA.oP0z9l0eF4jSQRExZ6rNkn4dN8C0hGC' //WH1Z123
+    'admin' => '$2a$12$Or6xUx6qiHaUnEDKTq8CFO8yhAsl3AwQ9/.MyuPKux.pxJ1TTeg2e', //admin@123
+    'user' => '$2a$12$Or6xUx6qiHaUnEDKTq8CFO8yhAsl3AwQ9/.MyuPKux.pxJ1TTeg2e' //WH1Z123
 );
 
 // Readonly users
@@ -4352,5 +4352,6 @@ function lng($txt) {
     else if (isset($tr['en'][$txt])) return fm_enc($tr['en'][$txt]);
     else return "$txt";
 }
+
 
 ?>
